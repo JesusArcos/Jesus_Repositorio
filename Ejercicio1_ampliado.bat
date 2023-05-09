@@ -1,0 +1,1 @@
+aws cloudformation deploy --stack-name Ejercicio1ampliado --template-file Ejercicio1_ampliado.yml
