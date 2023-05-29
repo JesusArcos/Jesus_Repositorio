@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Grupo de Seguridad y plantilla
+
+Parameters:
+  EC2InstanceType:
+    Type: String
+    Default: "t2.small"
+    AllowedValues: ["t2.nano", "t2.micro", "t2.small", "t2.medium", "t2.large"]
+  EC2AMI: 
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: "/aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
+
+Resources:
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      Tags:
+        - Key: "Name"
+          Value: !Join [ "-", [ !Ref "AWS::StackName", !Ref "AWS::AccountId"] ]
+      GroupDescription: !Sub "Grupo de Seguridad interno ${AWS::StackName}"
+      GroupName: WebSecurityGroup
+      SecurityGroupIngress:
+        - IpProtocol: TCP
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: TCP
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  WordPressDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: mariadb
+      DBInstanceIdentifier: WordPressBD
+      DBName: WordpressBBDD
+      AllocatedStorage: 20
+      DBInstanceClass: db.t2.micro
+      EngineVersion: '10.5'
+      MasterUsername: jesus
+      MasterUserPassword: usuario
+      VPCSecurityGroups:
+        - !Ref WebSecurityGroup
+
+  WordPressServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0aa2b7722dc1b5612
+      InstanceType: !Ref EC2InstanceType
+      KeyName: vockey
+      IamInstanceProfile: LabInstanceProfile
+      SecurityGroupIds:
+        - !Ref WebSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+
+          sudo dnf update && sudo dnf upgrade -y
+          sudo dnf install httpd -y && sudo service httpd start
+          sudo systemctl enable httpd
+          sudo dnf install mariadb105-server -y
+          sudo dnf install php php-devel -y
+          echo "<?php phpinfo();?>" | sudo tee /var/www/html/phpinfo.php &>/dev/null
+
+          sudo dnf install wget php-mysqlnd php-fpm php-mysqli php-json -y
+          su ec2-user
+          cd /home/ec2-user
+          wget https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz
+          sudo chown ec2-user:ec2-user wordpress
+          cp wordpress/wp-config-sample.php wordpress/wp-config.php
+          cd wordpress
+
+          cd /home/ec2-user
+          sudo cp -r wordpress/* /var/www/html/
+          sudo sed -i '156 s/None/All/' /etc/httpd/conf/httpd.conf
+          sudo dnf install php-gd -y
+          sudo chown -R apache:apache /var/www
+          sudo chmod 2775 /var/www
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref "AWS::StackName", !Ref "AWS::AccountId"]]
+
+Outputs:
+  InstanceId:
+    Description: Id de la instancia
+    Value: !Ref WordPressServer
+    Export:
+      Name: EC2InstanceType
+  ServerPublicIP:
+    Description: "Server"
+    Value: !Sub http://${WordPressServer.PublicDnsName}:80
+    Export:
+      Name: ServerIP
+
+  LinkPointDB:
+    Description: enlace
+    Value: !Sub ${WordpressDB.Endpoint.Address}
+  
